@@ -7,7 +7,7 @@ import torch
 import wandb
 from src.data.continual_data import ContinualDataModule
 from src.pl_modules.pareto_cl import ParetoCL
-from src.utils import parse_args
+from src.utils import parse_args, timer
 
 # Map dataset names to backbone names
 BACKBONE_MAP = {
@@ -140,66 +140,70 @@ def main():
     taskwise_accuracies = {}
 
     # Training Loop
-    for task_id in range(num_tasks):
-        print(f"\n=== Task {task_id + 1}/{num_tasks} ===")
-        dm.set_task(task_id)
-        model.current_task_id = task_id
+    # Table 3: total wall-clock time for the whole run (training + buffer
+    # rebalancing + per-task validation), matching the paper's training-time
+    # comparison protocol.
+    with timer(f"total_training | {args.dataset} | {setting} | seed={args.seed}") as train_timer:
+        for task_id in range(num_tasks):
+            print(f"\n=== Task {task_id + 1}/{num_tasks} ===")
+            dm.set_task(task_id)
+            model.current_task_id = task_id
 
-        # Expand the output head before training on the new task so that the
-        # model can predict all classes seen so far (class-incremental setting).
-        if task_id > 0:
-            model.expand_head((task_id + 1) * dm.classes_per_task)
+            # Expand the output head before training on the new task so that the
+            # model can predict all classes seen so far (class-incremental setting).
+            if task_id > 0:
+                model.expand_head((task_id + 1) * dm.classes_per_task)
 
-        model.epoch_offset = task_id * args.epochs  # = total epochs from previous tasks
+            model.epoch_offset = task_id * args.epochs  # = total epochs from previous tasks
 
-        trainer = pl.Trainer(
-            max_epochs=args.epochs,
-            accelerator="auto",
-            devices=[args.gpu_id] if torch.cuda.is_available() else None,
-            enable_checkpointing=False,
-            logger=wandb_logger,
-            enable_progress_bar=True,
-            gradient_clip_val=1.0,
-        )
-
-        trainer.fit(model, datamodule=dm)
-
-        # Update buffer with samples from the just-trained task
-        update_buffer(dm.buffer, dm.train_dataset, task_id)
-
-        # Validate on all seen tasks
-        val_results = trainer.validate(model, datamodule=dm, verbose=False)
-
-        # Flatten the list of result dicts
-        flat_results = {}
-        if isinstance(val_results, list):
-            for res in val_results:
-                flat_results.update(res)
-        else:
-            flat_results = val_results
-
-        # Collect per-task accuracies
-        accuracies = []
-        for i in range(task_id + 1):
-            key = f"val_acc_task_{i}"
-            if key in flat_results:
-                accuracies.append(flat_results[key])
-
-        if accuracies:
-            avg_acc = sum(accuracies) / len(accuracies)
-            aa_after.append(avg_acc)
-            taskwise_accuracies[task_id] = accuracies
-            print(
-                f"After Task {task_id + 1}: AA={avg_acc:.4f} "
-                f"(tasks: {[f'{a:.4f}' for a in accuracies]})"
+            trainer = pl.Trainer(
+                max_epochs=args.epochs,
+                accelerator="auto",
+                devices=[args.gpu_id] if torch.cuda.is_available() else None,
+                enable_checkpointing=False,
+                logger=wandb_logger,
+                enable_progress_bar=True,
+                gradient_clip_val=1.0,
             )
-        else:
-            print("Could not compute average accuracy.")
 
-        # Per-task checkpoint, needed to reproduce Figure 3 (Pareto front at each stage).
-        torch.save(
-            model.model.state_dict(), f"{base_path}_model_aftertask{task_id + 1}.pt"
-        )
+            trainer.fit(model, datamodule=dm)
+
+            # Update buffer with samples from the just-trained task
+            update_buffer(dm.buffer, dm.train_dataset, task_id)
+
+            # Validate on all seen tasks
+            val_results = trainer.validate(model, datamodule=dm, verbose=False)
+
+            # Flatten the list of result dicts
+            flat_results = {}
+            if isinstance(val_results, list):
+                for res in val_results:
+                    flat_results.update(res)
+            else:
+                flat_results = val_results
+
+            # Collect per-task accuracies
+            accuracies = []
+            for i in range(task_id + 1):
+                key = f"val_acc_task_{i}"
+                if key in flat_results:
+                    accuracies.append(flat_results[key])
+
+            if accuracies:
+                avg_acc = sum(accuracies) / len(accuracies)
+                aa_after.append(avg_acc)
+                taskwise_accuracies[task_id] = accuracies
+                print(
+                    f"After Task {task_id + 1}: AA={avg_acc:.4f} "
+                    f"(tasks: {[f'{a:.4f}' for a in accuracies]})"
+                )
+            else:
+                print("Could not compute average accuracy.")
+
+            # Per-task checkpoint, needed to reproduce Figure 3 (Pareto front at each stage).
+            torch.save(
+                model.model.state_dict(), f"{base_path}_model_aftertask{task_id + 1}.pt"
+            )
 
     # Final metrics
     if aa_after:
@@ -221,6 +225,7 @@ def main():
         "aa_after": aa_after,
         "aaa": aaa if aa_after else None,
         "final_acc": final_acc if aa_after else None,
+        "train_time_sec": train_timer["seconds"],
     }
 
     with open(f"{base_path}.json", "w") as f:

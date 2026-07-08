@@ -1,4 +1,26 @@
 import argparse
+import time
+from contextlib import contextmanager
+
+
+@contextmanager
+def timer(name: str):
+    """Times a block and prints the elapsed duration on exit.
+
+    Yields a dict that is populated with the elapsed seconds (key
+    "seconds") once the block completes, so callers can persist the
+    measurement (e.g. into a results JSON) rather than only see it printed.
+
+    Usage:
+        with timer("training") as t:
+            ...
+        elapsed = t["seconds"]
+    """
+    t0 = time.time()
+    result = {}
+    yield result
+    result["seconds"] = time.time() - t0
+    print(f"[{name}] done in {result['seconds']:.0f} s")
 
 
 def generate_preferences(

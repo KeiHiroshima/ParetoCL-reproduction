@@ -66,6 +66,48 @@ def get_aa_aaa(path_shared, seed_list):
     df.to_csv(path_shared / "visualisation" / "summary.csv", index=True)
 
 
+def get_train_time(path_shared, seed_list):
+    """Table 3: total training wall-clock time (s), averaged over seeds.
+
+    Reads the "train_time_sec" field written by train.py (total time for the
+    task loop: training + buffer rebalancing + per-task validation). Runs
+    logged before this field existed are skipped with a warning.
+    """
+    dataset_list = DATASET_CONFIG.keys()
+
+    df = pd.DataFrame(columns=["time_sec_mean", "time_sec_std"], index=[])
+    for dataset in dataset_list:
+        for mode in ["online", "offline"]:
+            time_list = []
+            for seed in seed_list:
+                p = path_shared / dataset / mode / f"seed{seed}.json"
+                if not p.exists():
+                    continue
+                with open(p) as f:
+                    results = json.load(f)
+                if "train_time_sec" not in results:
+                    print(f"No train_time_sec in: {p} (re-run with the updated train.py)")
+                    continue
+                time_list.append(results["train_time_sec"])
+
+            if not time_list:
+                continue
+
+            time_mean = sum(time_list) / len(time_list)
+            time_std = (
+                sum((x - time_mean) ** 2 for x in time_list) / len(time_list)
+            ) ** 0.5
+
+            df.loc[f"{dataset}_{mode}"] = {
+                "time_sec_mean": round(time_mean, 1),
+                "time_sec_std": round(time_std, 1),
+            }
+
+    if not df.empty:
+        print(df)
+        df.to_csv(path_shared / "visualisation" / "table3_time.csv", index=True)
+
+
 def get_taskwise_aa(path_shared, seed_list):
     """Per-task AA heatmap, averaged over seeds (supplementary detail behind Table 1)."""
     for dataset, (num_tasks, _) in DATASET_CONFIG.items():
@@ -287,6 +329,7 @@ if __name__ == "__main__":
 
     get_aa_aaa(path_shared, args.seeds)
     get_taskwise_aa(path_shared, args.seeds)
+    get_train_time(path_shared, args.seeds)
 
     if args.sweep:
         visualise_sweep(path_shared, args.seeds)

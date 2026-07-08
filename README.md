@@ -2,7 +2,7 @@
 
 Reproduction of the **evaluation experiments** in *"Pareto Continual Learning: Preference-Conditioned Learning and Adaption for Dynamic Stability-Plasticity Trade-off"* (AAAI 2025, [arXiv:2503.23390](https://arxiv.org/abs/2503.23390)).
 
-This repository contains only the code needed to reproduce **Table 1** (main results, ParetoCL row), **Table 2** (replay-buffer-size ablation), and **Figure 3** (preference-conditioned Pareto front / dynamic vs. static preference adaptation). It was extracted and cleaned from a larger, exploratory reproduction codebase that also contained unrelated research extensions (a task-similarity-based preference-grouping scheme and a conditional-VAE hypernetwork variant) — neither of which appears in the paper, so both were removed here.
+This repository contains only the code needed to reproduce **Table 1** (main results, ParetoCL row), **Table 2** (replay-buffer-size ablation), **Table 3** (training wall-clock time), and **Figure 3** (preference-conditioned Pareto front / dynamic vs. static preference adaptation). It was extracted and cleaned from a larger, exploratory reproduction codebase that also contained unrelated research extensions (a task-similarity-based preference-grouping scheme and a conditional-VAE hypernetwork variant) — neither of which appears in the paper, so both were removed here.
 
 Baselines shown alongside ParetoCL in the paper's Table 1 (ER, DER++, CLSER, VR-MCL, …) and the MOO-baseline comparison in Table 4 (MGDA, Tchebycheff scalarization) are **not implemented** in this repository; it reproduces the ParetoCL method itself, not the full comparison table.
 
@@ -54,6 +54,10 @@ BUFFER=600  DATASETS=cifar100 SEEDS="0 1 2" scripts/run_table1.sh
 BUFFER=1000 DATASETS=cifar100 SEEDS="0 1 2" scripts/run_table1.sh
 BUFFER=1400 DATASETS=cifar100 SEEDS="0 1 2" scripts/run_table1.sh
 ```
+
+### Table 3 — training wall-clock time
+
+`train.py` times the whole per-run task loop (training + buffer rebalancing + per-task validation) with `src.utils.timer` and writes it to `train_time_sec` in `results/.../seed{N}.json` — no separate script needed, it's recorded automatically by `scripts/run_table1.sh`. `visualise.py` aggregates it across seeds into `results/.../visualisation/table3_time.csv` (mean/std, matching the paper's Table 3 "Time (s)" column). Runs logged before this field existed (or `--debug`/custom `--num_tasks` runs) are skipped with a warning rather than averaged in.
 
 ### Figure 3 — Pareto front / dynamic vs. static preference adaptation
 
@@ -183,6 +187,7 @@ ParetoCL-reproduction/
 | `ReplayBuffer` | `continual_data.py` | Pre-allocated buffer with random-replacement strategy |
 | `ContinualDataModule` | `continual_data.py` | Splits CIFAR-10/100/TinyImageNet into tasks; per-task and cumulative val dataloaders |
 | `update_buffer` | `train.py` | Rebalances buffer after each task |
+| `timer` | `utils.py` | Context manager used to time the Table 3 training wall-clock |
 
 ---
 
