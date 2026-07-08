@@ -26,7 +26,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 ```
 
-CIFAR-10/100 download automatically on first run. Seq-TinyImageNet is downloaded and reorganised automatically from `http://cs231n.stanford.edu/tiny-imagenet-200.zip`.
+All three datasets download automatically on first run from Hugging Face Hub (`uoft-cs/cifar10`, `uoft-cs/cifar100`, `zh-plus/tiny-imagenet`) via the `datasets` library, cached under `./data/hf_datasets`. This replaces torchvision's default sources (`www.cs.toronto.edu` / `cs231n.stanford.edu`) — single, non-CDN academic servers that are extremely slow or unreachable from some networks; HF Hub's CDN is ~10-20x faster in practice. `zh-plus/tiny-imagenet` is an unofficial community mirror; its 200 classes are the same, but the integer class-index-to-class ordering isn't guaranteed to match the original `wnids.txt` order, which only affects *which* classes land in which of the 10 tasks, not the task/class-count structure the paper specifies.
 
 ---
 

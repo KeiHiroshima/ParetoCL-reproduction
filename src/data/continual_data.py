@@ -1,64 +1,62 @@
 import os
-import urllib.request
-import zipfile
 from typing import Optional, Tuple
 
 import pytorch_lightning as pl
 import torch
 import torchvision.transforms as transforms
-from torch.utils.data import DataLoader, Subset
-from torchvision.datasets import CIFAR10, CIFAR100, ImageFolder
+from datasets import load_dataset
+from torch.utils.data import DataLoader, Dataset, Subset
+
+# Hugging Face mirrors used instead of torchvision's default sources
+# (www.cs.toronto.edu / cs231n.stanford.edu), which are single, non-CDN
+# academic servers that are extremely slow/unreachable from some networks.
+# HF Hub is CDN-backed and downloads at ~10-20x the speed in practice.
+HF_DATASET_CONFIG = {
+    "cifar10": dict(
+        repo_id="uoft-cs/cifar10",
+        image_key="img",
+        label_key="label",
+        test_split="test",
+    ),
+    "cifar100": dict(
+        repo_id="uoft-cs/cifar100",
+        image_key="img",
+        label_key="fine_label",
+        test_split="test",
+    ),
+    "tinyimagenet": dict(
+        repo_id="zh-plus/tiny-imagenet",
+        image_key="image",
+        label_key="label",
+        test_split="valid",
+    ),
+}
+
+HF_CACHE_DIR = os.path.join("./data", "hf_datasets")
 
 
-def _prepare_tinyimagenet(root: str = "./data") -> str:
-    """Download and reorganize TinyImageNet if not already present.
+class _HFImageDataset(Dataset):
+    """Adapts a Hugging Face `datasets.Dataset` split to the
+    (transformed image tensor, integer label) interface torchvision
+    datasets provide, so it plugs into `torch.utils.data.Subset`/`DataLoader`
+    unchanged."""
 
-    Returns the path to the extracted tiny-imagenet-200 directory.
-    """
-    data_path = os.path.join(root, "tiny-imagenet-200")
-    val_reorganized_flag = os.path.join(data_path, ".val_reorganized")
+    def __init__(self, hf_dataset, image_key: str, label_key: str, transform):
+        self.hf_dataset = hf_dataset
+        self.image_key = image_key
+        self.label_key = label_key
+        self.transform = transform
 
-    if not os.path.exists(data_path):
-        zip_path = os.path.join(root, "tiny-imagenet-200.zip")
-        url = "http://cs231n.stanford.edu/tiny-imagenet-200.zip"
-        print(f"Downloading TinyImageNet from {url} ...")
-        os.makedirs(root, exist_ok=True)
-        urllib.request.urlretrieve(url, zip_path)
-        print("Extracting TinyImageNet...")
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall(root)
-        os.remove(zip_path)
+    def __len__(self):
+        return len(self.hf_dataset)
 
-    # Reorganize val folder to match ImageFolder convention once
-    if not os.path.exists(val_reorganized_flag):
-        val_dir = os.path.join(data_path, "val")
-        val_images_dir = os.path.join(val_dir, "images")
-        val_annotations = os.path.join(val_dir, "val_annotations.txt")
-
-        if os.path.exists(val_annotations) and os.path.exists(val_images_dir):
-            print("Reorganizing TinyImageNet val split...")
-            with open(val_annotations) as f:
-                lines = f.readlines()
-            for line in lines:
-                parts = line.strip().split("\t")
-                img_name, class_name = parts[0], parts[1]
-                class_dir = os.path.join(val_dir, class_name)
-                os.makedirs(class_dir, exist_ok=True)
-                src = os.path.join(val_images_dir, img_name)
-                dst = os.path.join(class_dir, img_name)
-                if os.path.exists(src):
-                    os.rename(src, dst)
-            # Clean up empty images dir
-            try:
-                os.rmdir(val_images_dir)
-            except OSError:
-                pass
-
-        # Write flag so we don't redo this
-        with open(val_reorganized_flag, "w") as f:
-            f.write("done")
-
-    return data_path
+    def __getitem__(self, idx):
+        # `Subset.indices` are stored as a torch.Tensor (from `.nonzero()`), so
+        # `idx` may arrive as a 0-d tensor; `datasets.Dataset.__getitem__`
+        # only accepts plain Python ints/slices/lists.
+        row = self.hf_dataset[int(idx)]
+        image = row[self.image_key].convert("RGB")
+        return self.transform(image), row[self.label_key]
 
 
 class ReplayBuffer:
@@ -144,48 +142,29 @@ class ContinualDataModule(pl.LightningDataModule):
         self.task_datasets = []  # List of (train_subset, test_subset) for each task
 
     def prepare_data(self):
-        if self.dataset_name == "cifar100":
-            CIFAR100(root="./data", train=True, download=True)
-            CIFAR100(root="./data", train=False, download=True)
-        elif self.dataset_name == "cifar10":
-            CIFAR10(root="./data", train=True, download=True)
-            CIFAR10(root="./data", train=False, download=True)
-        elif self.dataset_name == "tinyimagenet":
-            _prepare_tinyimagenet("./data")
+        cfg = HF_DATASET_CONFIG[self.dataset_name]
+        # Triggers (and caches) the download; cached on subsequent calls/runs.
+        load_dataset(cfg["repo_id"], cache_dir=HF_CACHE_DIR)
 
     def setup(self, stage: Optional[str] = None):
-        if self.dataset_name == "cifar100":
-            full_train = CIFAR100(root="./data", train=True, transform=self.transform)
-            full_test = CIFAR100(root="./data", train=False, transform=self.transform)
-            targets_train = torch.tensor(full_train.targets)
-            targets_test = torch.tensor(full_test.targets)
-            self._build_task_splits_from_targets(
-                full_train, full_test, targets_train, targets_test
-            )
+        cfg = HF_DATASET_CONFIG[self.dataset_name]
+        hf_splits = load_dataset(cfg["repo_id"], cache_dir=HF_CACHE_DIR)
+        hf_train = hf_splits["train"]
+        hf_test = hf_splits[cfg["test_split"]]
 
-        elif self.dataset_name == "cifar10":
-            full_train = CIFAR10(root="./data", train=True, transform=self.transform)
-            full_test = CIFAR10(root="./data", train=False, transform=self.transform)
-            targets_train = torch.tensor(full_train.targets)
-            targets_test = torch.tensor(full_test.targets)
-            self._build_task_splits_from_targets(
-                full_train, full_test, targets_train, targets_test
-            )
+        full_train = _HFImageDataset(
+            hf_train, cfg["image_key"], cfg["label_key"], self.transform
+        )
+        full_test = _HFImageDataset(
+            hf_test, cfg["image_key"], cfg["label_key"], self.transform
+        )
+        # Column-only access (no image decoding) to get integer labels.
+        targets_train = torch.tensor(hf_train[cfg["label_key"]])
+        targets_test = torch.tensor(hf_test[cfg["label_key"]])
 
-        elif self.dataset_name == "tinyimagenet":
-            data_path = _prepare_tinyimagenet("./data")
-            # ImageFolder sorts classes alphabetically; the class index == label
-            full_train = ImageFolder(
-                os.path.join(data_path, "train"), transform=self.transform
-            )
-            full_test = ImageFolder(
-                os.path.join(data_path, "val"), transform=self.transform
-            )
-            targets_train = torch.tensor([s[1] for s in full_train.samples])
-            targets_test = torch.tensor([s[1] for s in full_test.samples])
-            self._build_task_splits_from_targets(
-                full_train, full_test, targets_train, targets_test
-            )
+        self._build_task_splits_from_targets(
+            full_train, full_test, targets_train, targets_test
+        )
 
     def _build_task_splits_from_targets(
         self, full_train, full_test, targets_train, targets_test
