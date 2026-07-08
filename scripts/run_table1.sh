@@ -42,11 +42,9 @@ run_exp() {
         2>&1 | tee "$BASE/seed${SEED}.log"
 }
 
-for SETTING in online offline; do
+for SETTING in online ; do #offline
     for DATASET in $DATASETS; do
-        for SEED in $SEEDS; do
-            run_exp "$DATASET" "$SETTING" "$SEED"
-        done
+        run_exp "$DATASET" "$SETTING" 0
     done
 done
 

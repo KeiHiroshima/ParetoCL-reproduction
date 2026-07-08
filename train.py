@@ -3,8 +3,8 @@ import os
 
 import pytorch_lightning as pl
 import torch
-
 import wandb
+
 from src.data.continual_data import ContinualDataModule
 from src.pl_modules.pareto_cl import ParetoCL
 from src.utils import parse_args, timer
@@ -95,6 +95,8 @@ def main():
     dm.prepare_data()
     dm.setup()
 
+    assert False, "This is data load check"
+
     backbone = BACKBONE_MAP[args.dataset]
 
     # Model: start with only the first task's classes; head grows each task.
@@ -143,7 +145,9 @@ def main():
     # Table 3: total wall-clock time for the whole run (training + buffer
     # rebalancing + per-task validation), matching the paper's training-time
     # comparison protocol.
-    with timer(f"total_training | {args.dataset} | {setting} | seed={args.seed}") as train_timer:
+    with timer(
+        f"total_training | {args.dataset} | {setting} | seed={args.seed}"
+    ) as train_timer:
         for task_id in range(num_tasks):
             print(f"\n=== Task {task_id + 1}/{num_tasks} ===")
             dm.set_task(task_id)
@@ -154,7 +158,9 @@ def main():
             if task_id > 0:
                 model.expand_head((task_id + 1) * dm.classes_per_task)
 
-            model.epoch_offset = task_id * args.epochs  # = total epochs from previous tasks
+            model.epoch_offset = (
+                task_id * args.epochs
+            )  # = total epochs from previous tasks
 
             trainer = pl.Trainer(
                 max_epochs=args.epochs,
