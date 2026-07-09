@@ -2,15 +2,6 @@
 # Reproduce Figure 3(left): Pareto front approximated by ParetoCL at each
 # training stage. Sweeps preference[0] (α_stability) from 0 to 1 and
 # evaluates every per-task checkpoint saved by scripts/run_table1.sh.
-#
-# Run scripts/run_table1.sh first so that seed${SEED}_model_aftertask*.pt
-# checkpoints exist under LOG_DIR.
-#
-# infer.py --sweep appends to any existing seed*_inference_sweep_aftertask*.json,
-# so re-running a setting that has already been swept would duplicate its
-# entries. Use SETTINGS to scope a run to only the setting(s) you need, e.g.
-# to backfill the offline sweep without touching an already-generated online
-# sweep: SETTINGS=offline DATASETS=cifar10 bash scripts/run_infer_sweep.sh
 
 set -e
 
