@@ -17,8 +17,6 @@ plt.rcParams["ytick.labelsize"] = 10
 
 DATASET_CONFIG = {"cifar10": (5, 2), "cifar100": (10, 10), "tinyimagenet": (10, 20)}
 
-LINESTYLES = ["-", "--", "-.", ":", (0, (3, 1, 1, 1)), (0, (5, 2))]
-
 
 def get_aa_aaa(path_shared, seed_list):
     """Table 1 / Table 2: AAA and final Acc, averaged over seeds."""
@@ -86,7 +84,9 @@ def get_train_time(path_shared, seed_list):
                 with open(p) as f:
                     results = json.load(f)
                 if "train_time_sec" not in results:
-                    print(f"No train_time_sec in: {p} (re-run with the updated train.py)")
+                    print(
+                        f"No train_time_sec in: {p} (re-run with the updated train.py)"
+                    )
                     continue
                 time_list.append(results["train_time_sec"])
 
@@ -217,11 +217,19 @@ def _aggregate_seeds(seed_data: list) -> list:
 
 
 def visualise_sweep(path_shared: Path, seed_list: list) -> None:
-    """Figure 3(left): Pareto front approximated by ParetoCL at each training stage."""
-    colors = plt.get_cmap("tab10").colors
+    """Figure 3(left): Pareto front approximated by ParetoCL at each training stage.
+
+    For each per-task checkpoint (stage), scatters A_old (mean accuracy on
+    previously-learned tasks, y-axis) against A_new (accuracy on the
+    just-learned task, x-axis) for every swept preference vector, colored by
+    preference[0] (α_stability). Stage 1 has no previous tasks (A_old is
+    undefined) and is skipped, matching the paper's 4-panel layout for
+    Seq-CIFAR10 (5 tasks → stages 2..5).
+    """
+    cmap = plt.get_cmap("coolwarm")
 
     for dataset, (num_tasks, _) in DATASET_CONFIG.items():
-        for task_id in range(1, num_tasks + 1):
+        for task_id in range(2, num_tasks + 1):
             for mode in ["online", "offline"]:
                 seed_data = []
                 for seed in seed_list:
@@ -241,65 +249,131 @@ def visualise_sweep(path_shared: Path, seed_list: list) -> None:
                     continue
 
                 aggregated = _aggregate_seeds(seed_data)
-                pref_x = [entry["preference"][0] for entry in aggregated]
 
-                fig, ax = plt.subplots(figsize=(6, 4))
-
-                for t in range(num_tasks):
-                    accs = [entry["task_accuracies"][t] for entry in aggregated]
-                    accs_std = [entry["task_accuracies_std"][t] for entry in aggregated]
-                    ax.plot(
-                        pref_x,
-                        accs,
-                        color=colors[t % len(colors)],
-                        linestyle=LINESTYLES[t % len(LINESTYLES)],
-                        marker="o",
-                        markersize=3,
-                        label=f"task_{t + 1}",
-                    )
-                    ax.fill_between(
-                        pref_x,
-                        np.array(accs) - np.array(accs_std),
-                        np.array(accs) + np.array(accs_std),
-                        color=colors[t % len(colors)],
-                        alpha=0.2,
-                    )
-
-                avg_accs = [entry["average_accuracy"] for entry in aggregated]
-                avg_accs_std = [entry["average_accuracy_std"] for entry in aggregated]
-                ax.plot(
-                    pref_x,
-                    avg_accs,
-                    color="black",
-                    linestyle="-",
-                    linewidth=2,
-                    marker="s",
-                    markersize=4,
-                    label="average_accuracy",
+                pref0 = np.array([entry["preference"][0] for entry in aggregated])
+                a_new = np.array(
+                    [entry["task_accuracies"][task_id - 1] for entry in aggregated]
                 )
-                ax.fill_between(
-                    pref_x,
-                    np.array(avg_accs) - np.array(avg_accs_std),
-                    np.array(avg_accs) + np.array(avg_accs_std),
-                    color="black",
-                    alpha=0.2,
+                a_old = np.array(
+                    [
+                        np.mean(entry["task_accuracies"][: task_id - 1])
+                        for entry in aggregated
+                    ]
                 )
 
-                ax.set_xlabel("preference[0] (α_stability)")
-                ax.set_ylabel("accuracy")
-                ax.set_title(f"{dataset} {mode} — preference sweep (after task {task_id})")
-                ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.2f}"))
-                ax.legend(loc="center left", bbox_to_anchor=(1, 0.5), fontsize=8)
+                fig, ax = plt.subplots(figsize=(5, 5))
+                sc = ax.scatter(
+                    a_new * 100,
+                    a_old * 100,
+                    c=pref0,
+                    cmap=cmap,
+                    vmin=0.0,
+                    vmax=1.0,
+                    s=40,
+                    edgecolors="black",
+                    linewidths=0.3,
+                )
+                cbar = fig.colorbar(sc, ax=ax)
+                cbar.set_label("preference[0] (α_stability)")
+
+                ax.set_xlabel("A_new (accuracy on current task, %)")
+                ax.set_ylabel("A_old (avg. accuracy on previous tasks, %)")
+                ax.set_title(f"{dataset} {mode} — Pareto front (after task {task_id})")
                 plt.tight_layout()
 
-                out_path = (
-                    path_shared
-                    / "visualisation"
-                    / f"sweep_{dataset}_{mode}_aftertask{task_id}.pdf"
+                out_path = path_shared / "visualisation_inference"
+                os.makedirs(out_path, exist_ok=True)
+                plt.savefig(
+                    out_path / f"pareto_front_{dataset}_{mode}_aftertask{task_id}.pdf",
+                    bbox_inches="tight",
                 )
-                plt.savefig(out_path, bbox_inches="tight")
                 plt.close()
-                print(f"Saved: {out_path}")
+                print(
+                    f"Saved: {out_path / f'pareto_front_{dataset}_{mode}_aftertask{task_id}.pdf'}"
+                )
+
+
+def visualise_incremental_accuracy(path_shared: Path, seed_list: list) -> None:
+    """Figure 3(right): ParetoCL (dynamic) vs ParetoCL-- (static α=(0.5, 0.5))
+    average-accuracy-after-each-task curves, Seq-CIFAR100 online setting.
+
+    ER, DER++, and CLSER are not implemented in this repository and are
+    therefore not included as comparison curves — this reproduces only the
+    two ParetoCL variants from Figure 3(right).
+
+    ParetoCL-- curves are read from seed{n}_inference_fixed_aftertask{t}.json
+    (produced by `infer.py --preference 0.5 0.5` against each per-task
+    checkpoint, see scripts/run_paretocl_minus.sh). Note that infer.py
+    evaluates against all of the dataset's tasks regardless of how many the
+    checkpoint has actually learned, so the JSON's own "average_accuracy"
+    field is wrong for non-final stages (it's diluted by never-learned
+    tasks); we ignore it and instead recompute the average from
+    task_accuracies[:t], which is valid for any t.
+    """
+    dataset = "cifar100"
+    mode = "online"
+    num_tasks, _ = DATASET_CONFIG[dataset]
+    base = path_shared / dataset / mode
+
+    paretocl_curves = []
+    paretocl_minus_curves = []
+
+    for seed in seed_list:
+        p = base / f"seed{seed}.json"
+        if p.exists():
+            with open(p) as f:
+                results = json.load(f)
+            aa_after = results.get("aa_after")
+            if aa_after and len(aa_after) == num_tasks:
+                paretocl_curves.append(aa_after)
+            else:
+                print(f"Incomplete aa_after in: {p}")
+        else:
+            print(f"Missing: {p}")
+
+        minus_curve = []
+        for t in range(1, num_tasks + 1):
+            fp = base / f"seed{seed}_inference_fixed_aftertask{t}.json"
+            if not fp.exists():
+                print(f"Missing: {fp}")
+                break
+            with open(fp) as f:
+                entries = json.load(f)
+            task_accs = entries[-1]["task_accuracies"]
+            minus_curve.append(float(np.mean(task_accs[:t])))
+        if len(minus_curve) == num_tasks:
+            paretocl_minus_curves.append(minus_curve)
+
+    if not paretocl_curves and not paretocl_minus_curves:
+        print("No data found for Figure 3(right); skipping.")
+        return
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    x = np.arange(1, num_tasks + 1)
+
+    for label, curves, color in [
+        ("ParetoCL", paretocl_curves, "tab:blue"),
+        ("ParetoCL--", paretocl_minus_curves, "tab:orange"),
+    ]:
+        if not curves:
+            continue
+        arr = np.array(curves) * 100
+        mean = arr.mean(axis=0)
+        std = arr.std(axis=0)
+        ax.plot(x, mean, marker="o", markersize=3, label=label, color=color)
+        ax.fill_between(x, mean - std, mean + std, color=color, alpha=0.2)
+
+    ax.set_xlabel("Learned tasks")
+    ax.set_ylabel("Accuracy after each task (%)")
+    ax.set_title(f"{dataset} {mode} — incremental accuracy")
+    ax.set_xticks(x)
+    ax.legend()
+    plt.tight_layout()
+
+    out_path = path_shared / "visualisation" / f"figure3_right_{dataset}_{mode}.pdf"
+    plt.savefig(out_path, bbox_inches="tight")
+    plt.close()
+    print(f"Saved: {out_path}")
 
 
 if __name__ == "__main__":
@@ -322,14 +396,27 @@ if __name__ == "__main__":
         action="store_true",
         help="Also plot the Figure 3(left) preference sweep (requires infer.py --sweep logs).",
     )
+    parser.add_argument(
+        "--fig3_right",
+        action="store_true",
+        help=(
+            "Also plot the Figure 3(right) incremental-accuracy comparison "
+            "(ParetoCL vs ParetoCL--, Seq-CIFAR100 online; requires "
+            "scripts/run_paretocl_minus.sh logs)."
+        ),
+    )
     args = parser.parse_args()
     path_shared = Path(args.path_shared)
 
     os.makedirs(path_shared / "visualisation", exist_ok=True)
 
-    get_aa_aaa(path_shared, args.seeds)
-    get_taskwise_aa(path_shared, args.seeds)
-    get_train_time(path_shared, args.seeds)
-
     if args.sweep:
         visualise_sweep(path_shared, args.seeds)
+
+    if args.fig3_right:
+        visualise_incremental_accuracy(path_shared, args.seeds)
+
+    if not args.sweep and not args.fig3_right:
+        get_aa_aaa(path_shared, args.seeds)
+        get_taskwise_aa(path_shared, args.seeds)
+        get_train_time(path_shared, args.seeds)
