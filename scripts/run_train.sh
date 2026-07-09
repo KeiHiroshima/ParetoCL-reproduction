@@ -1,13 +1,4 @@
 #!/bin/bash
-# Reproduce Table 1 (ParetoCL row): Seq-CIFAR10, Seq-CIFAR100, Seq-TinyImageNet
-# Online (1 epoch/task) and Offline (5 epochs/task), 5 seeds each.
-# Paper defaults: buffer_size=1000, lr=0.05.
-#
-# For Table 2 (buffer-size ablation on Seq-CIFAR100, online setting),
-# override BUFFER, e.g.:
-#   BUFFER=600  DATASETS=cifar100 SEEDS="0 1 2" ./scripts/run_table1.sh
-#   BUFFER=1000 DATASETS=cifar100 SEEDS="0 1 2" ./scripts/run_table1.sh
-#   BUFFER=1400 DATASETS=cifar100 SEEDS="0 1 2" ./scripts/run_table1.sh
 
 set -e
 

@@ -3,16 +3,7 @@
 # comparison on Seq-CIFAR100, online setting.
 #
 # ParetoCL-- uses a static preference α=(0.5, 0.5) at inference instead of
-# the dynamic entropy-based selection (Algorithm 2). This script evaluates
-# every per-task checkpoint saved by scripts/run_table1.sh at that fixed
-# preference; the dynamic ParetoCL curve is already available from that
-# run's seed{N}.json (aa_after), so no extra work is needed for it here.
-#
-# ER, DER++, and CLSER are not implemented in this repository, so Figure
-# 3(right) is reproduced with only the ParetoCL / ParetoCL-- curves.
-#
-# Run scripts/run_table1.sh first (cifar100, online) so that
-# seed${SEED}_model_aftertask*.pt checkpoints exist under LOG_DIR.
+# the dynamic entropy-based selection (Algorithm 2).
 
 set -e
 
