@@ -95,8 +95,6 @@ def main():
     dm.prepare_data()
     dm.setup()
 
-    assert False, "This is data load check"
-
     backbone = BACKBONE_MAP[args.dataset]
 
     # Model: start with only the first task's classes; head grows each task.

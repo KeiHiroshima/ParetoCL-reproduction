@@ -59,7 +59,7 @@ BUFFER=1400 DATASETS=cifar100 SEEDS="0 1 2" scripts/run_table1.sh
 
 `train.py` times the whole per-run task loop (training + buffer rebalancing + per-task validation) with `src.utils.timer` and writes it to `train_time_sec` in `results/.../seed{N}.json` — no separate script needed, it's recorded automatically by `scripts/run_table1.sh`. `visualise.py` aggregates it across seeds into `results/.../visualisation/table3_time.csv` (mean/std, matching the paper's Table 3 "Time (s)" column). Runs logged before this field existed (or `--debug`/custom `--num_tasks` runs) are skipped with a warning rather than averaged in.
 
-### Figure 3 — Pareto front / dynamic vs. static preference adaptation
+### Figure 3(left) — Pareto front approximated by ParetoCL
 
 Run `scripts/run_table1.sh` first (it saves a checkpoint after every task), then:
 
@@ -67,13 +67,29 @@ Run `scripts/run_table1.sh` first (it saves a checkpoint after every task), then
 bash scripts/run_infer_sweep.sh
 ```
 
-This sweeps `α = (α_stability, 1 - α_stability)` over 21 points for every per-task checkpoint and plots the resulting accuracy-vs-preference curves (`results/.../visualisation/sweep_*.pdf`), which is what Figure 3(left)'s Pareto front is built from. Figure 3(right)'s "ParetoCL--" variant (static α=(0.5, 0.5) at inference) can be obtained the same way by reading off the sweep at `preference[0]=0.5`, or via a single fixed-preference call:
+This sweeps `α = (α_stability, 1 - α_stability)` over 21 points for every per-task checkpoint. `visualise.py --sweep` (called automatically at the end) turns each stage's sweep into an **A_old vs A_new scatter plot** (`results/.../visualisation/pareto_front_{dataset}_{mode}_aftertask{t}.pdf`), colored by `preference[0]` (α_stability) — this is what Figure 3(left)'s Pareto front is built from. The paper's actual setting is Seq-CIFAR10, offline; stage 1 has no previous tasks (A_old undefined) and is skipped.
+
+`infer.py --sweep` **appends** to any existing `seed*_inference_sweep_aftertask*.json`, so re-running a setting that was already swept would duplicate its entries. Use `SETTINGS` to scope a run to just the setting you need — e.g. to backfill the offline sweep without touching an already-generated online sweep:
+
+```bash
+SETTINGS=offline DATASETS=cifar10 bash scripts/run_infer_sweep.sh
+```
+
+### Figure 3(right) — ParetoCL vs ParetoCL-- incremental accuracy
+
+The paper compares 5 methods here (ParetoCL, ParetoCL--, ER, DER++, CLSER). Since this repository only implements ParetoCL (see the top-of-README note on unimplemented baselines), this reproduction is limited to **ParetoCL vs ParetoCL--** on Seq-CIFAR100, online setting:
+
+```bash
+bash scripts/run_paretocl_minus.sh
+```
+
+ParetoCL's dynamic curve (Algorithm 2, entropy-based selection) is already what `train.py` logs as `aa_after` in `seed{N}.json` — no extra run needed. ParetoCL-- uses a static `α=(0.5, 0.5)` at inference instead:
 
 ```bash
 uv run python infer.py --model-pt <ckpt>.pt --model-config <ckpt>_model_config.json --dataset cifar100 --preference 0.5 0.5
 ```
 
-The dynamic-adaptation numbers (Algorithm 2, entropy-based selection) are already what `train.py` logs as `val_acc_task_*` / `aa_after`, since validation always uses `_infer_with_preference_adaptation`.
+`scripts/run_paretocl_minus.sh` runs this against every per-task checkpoint and calls `visualise.py --fig3_right`, which plots both curves to `results/.../visualisation/figure3_right_cifar100_online.pdf`.
 
 ### Quick debug run (1 epoch, 2 tasks, tiny buffer)
 
@@ -171,7 +187,8 @@ ParetoCL-reproduction/
 ├── visualise.py                # Aggregates results into Table 1/2 summaries and Figure 3 plots
 └── scripts/
     ├── run_table1.sh           # Table 1 & 2 driver
-    └── run_infer_sweep.sh      # Figure 3 driver
+    ├── run_infer_sweep.sh      # Figure 3(left) driver
+    └── run_paretocl_minus.sh   # Figure 3(right) driver
 ```
 
 ### Key classes and functions
@@ -186,6 +203,8 @@ ParetoCL-reproduction/
 | `ParetoCL._infer_with_preference_adaptation(x)` | `pareto_cl.py` | Algorithm 2 — picks min-entropy prediction over K=20 preferences |
 | `ReplayBuffer` | `continual_data.py` | Pre-allocated buffer with random-replacement strategy |
 | `ContinualDataModule` | `continual_data.py` | Splits CIFAR-10/100/TinyImageNet into tasks; per-task and cumulative val dataloaders |
+| `visualise_sweep` | `visualise.py` | Figure 3(left) — A_old vs A_new Pareto-front scatter per stage, colored by preference |
+| `visualise_incremental_accuracy` | `visualise.py` | Figure 3(right) — ParetoCL vs ParetoCL-- accuracy-after-each-task curves |
 | `update_buffer` | `train.py` | Rebalances buffer after each task |
 | `timer` | `utils.py` | Context manager used to time the Table 3 training wall-clock |
 

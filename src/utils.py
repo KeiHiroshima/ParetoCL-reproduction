@@ -57,7 +57,7 @@ def parse_args(DATASET_CONFIG):
     )
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=0.05)
-    parser.add_argument("--buffer_size", type=int, default=32)
+    parser.add_argument("--buffer_size", type=int, default=1000)
     parser.add_argument(
         "--num_tasks",
         type=int,

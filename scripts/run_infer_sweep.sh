@@ -5,13 +5,22 @@
 #
 # Run scripts/run_table1.sh first so that seed${SEED}_model_aftertask*.pt
 # checkpoints exist under LOG_DIR.
+#
+# infer.py --sweep appends to any existing seed*_inference_sweep_aftertask*.json,
+# so re-running a setting that has already been swept would duplicate its
+# entries. Use SETTINGS to scope a run to only the setting(s) you need, e.g.
+# to backfill the offline sweep without touching an already-generated online
+# sweep: SETTINGS=offline DATASETS=cifar10 bash scripts/run_infer_sweep.sh
 
 set -e
 
-BUFFER="${BUFFER:-32}"
-LOG_DIR="${LOG_DIR:-results/table1_buffer${BUFFER}}"
+BUFFER="${BUFFER:-1000}"
+LOG_DIR="${LOG_DIR:-results/buffer${BUFFER}}"
 DATASETS="${DATASETS:-cifar10 cifar100 tinyimagenet}"
-SEEDS="${SEEDS:-0 1 2 3 4}"
+SEEDS="${SEEDS:-0 1 2}"
+read -ra SEEDS <<< "$SEEDS"
+SETTINGS="${SETTINGS:-online offline}"
+read -ra SETTINGS <<< "$SETTINGS"
 
 declare -A NUM_TASKS=(
     ["cifar10"]=5
@@ -45,12 +54,12 @@ run_exp() {
     done
 }
 
-for SETTING in online offline; do
+for SETTING in "${SETTINGS[@]}"; do
     for DATASET in $DATASETS; do
-        for SEED in $SEEDS; do
-            run_exp "$DATASET" "$SETTING" "$SEED"
-        done
+        run_exp "$DATASET" "$SETTING" "${SEEDS[0]}" &\
+        run_exp "$DATASET" "$SETTING" "${SEEDS[1]}" &\
+        run_exp "$DATASET" "$SETTING" "${SEEDS[2]}"
     done
 done
 
-uv run python visualise.py --path_shared "$LOG_DIR" --seeds $SEEDS --sweep
+uv run python visualise.py --path_shared "$LOG_DIR" --seeds "${SEEDS[@]}" --sweep

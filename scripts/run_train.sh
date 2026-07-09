@@ -1,7 +1,7 @@
 #!/bin/bash
 # Reproduce Table 1 (ParetoCL row): Seq-CIFAR10, Seq-CIFAR100, Seq-TinyImageNet
 # Online (1 epoch/task) and Offline (5 epochs/task), 5 seeds each.
-# Paper defaults: buffer_size=32, lr=0.05.
+# Paper defaults: buffer_size=1000, lr=0.05.
 #
 # For Table 2 (buffer-size ablation on Seq-CIFAR100, online setting),
 # override BUFFER, e.g.:
@@ -11,11 +11,12 @@
 
 set -e
 
-BUFFER="${BUFFER:-32}"
+BUFFER="${BUFFER:-1000}"
 LR="${LR:-0.05}"
-LOG_DIR="${LOG_DIR:-results/table1_buffer${BUFFER}}"
+LOG_DIR="${LOG_DIR:-results/buffer${BUFFER}}"
 DATASETS="${DATASETS:-cifar10 cifar100 tinyimagenet}"
-SEEDS="${SEEDS:-0 1 2 3 4}"
+SEEDS="${SEEDS:-0 1 2}"
+read -ra SEEDS <<< "$SEEDS"
 
 run_exp() {
     local DATASET=$1
@@ -42,10 +43,13 @@ run_exp() {
         2>&1 | tee "$BASE/seed${SEED}.log"
 }
 
-for SETTING in online ; do #offline
+
+for SETTING in online offline; do
     for DATASET in $DATASETS; do
-        run_exp "$DATASET" "$SETTING" 0
+        run_exp "$DATASET" "$SETTING" "${SEEDS[0]}" &\
+        run_exp "$DATASET" "$SETTING" "${SEEDS[1]}" &\
+        run_exp "$DATASET" "$SETTING" "${SEEDS[2]}"
     done
 done
 
-uv run python visualise.py --path_shared "$LOG_DIR" --seeds $SEEDS
+uv run python visualise.py --path_shared "$LOG_DIR" --seeds "${SEEDS[@]}"
